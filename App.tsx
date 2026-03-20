@@ -127,7 +127,17 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, { id: botMsgId, role: 'model', text: loadingText, timestamp: new Date() }]);
 
     try {
-      const response = await sendMessageToGeminiStream(textToSend, fileToSend || undefined, messages, appLanguage, false, analysis || cdssResults);
+      const response = await sendMessageToGeminiStream(
+        textToSend, 
+        fileToSend || undefined, 
+        messages, 
+        appLanguage, 
+        false, 
+        analysis || cdssResults,
+        undefined,
+        currentUser?.role,
+        currentUser?.username
+      );
       
       setMessages(prev => prev.map(m => m.id === botMsgId ? { 
         ...m, 

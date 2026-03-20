@@ -1,111 +1,151 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
+import { GoogleGenAI } from "@google/genai";
+import rateLimit from "express-rate-limit";
+import path from "path";
+import { supabase } from "./supabase";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' })); // Increase limit for images
 
-  // Initialize SQLite database
-  const db = await open({
-    filename: './database.sqlite',
-    driver: sqlite3.Database
+  // --- Rate Limiting ---
+  const chatLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // Limit each IP to 20 requests per window
+    message: { error: "Terlalu banyak permintaan. Silakan coba lagi dalam 15 menit." },
+    standardHeaders: true,
+    legacyHeaders: false,
   });
 
-  // Create tables if they don't exist
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      username TEXT PRIMARY KEY,
-      password TEXT,
-      role TEXT,
-      createdAt INTEGER
-    );
+  // --- Gemini Chat Proxy ---
+  app.post("/api/chat", chatLimiter, async (req, res) => {
+    const { message, image, language, cdssAnalysis, userRole, username } = req.body;
+    
+    const today = new Date().toISOString().split('T')[0];
+    const user = username || 'anonymous';
+    
+    // Define limits based on roles
+    const limits: Record<string, number> = {
+      'user': 5,
+      'admin': 100,
+      'super_saint': 1000
+    };
+    
+    const userLimit = limits[userRole] || 5;
 
-    CREATE TABLE IF NOT EXISTS patients (
-      id TEXT PRIMARY KEY,
-      patientName TEXT,
-      age TEXT,
-      sex TEXT,
-      address TEXT,
-      complaint TEXT,
-      symptoms TEXT,
-      selectedSymptoms TEXT,
-      tongue TEXT,
-      pulse TEXT,
-      diagnosis TEXT,
-      timestamp INTEGER,
-      medicalHistory TEXT,
-      biomedicalDiagnosis TEXT,
-      icd10 TEXT
-    );
-  `);
+    try {
+      // Check usage from Supabase
+      const { data: usage, error: usageError } = await supabase
+        .from('usage')
+        .select('count')
+        .eq('username', user)
+        .eq('date', today)
+        .single();
 
-  // Seed default admin if not exists
-  const adminExists = await db.get('SELECT * FROM users WHERE username = ?', ['admin']);
-  if (!adminExists) {
-    await db.run('INSERT INTO users (username, password, role, createdAt) VALUES (?, ?, ?, ?)', ['admin', '', 'admin', Date.now()]);
+      const currentCount = usage ? usage.count : 0;
+
+      if (currentCount >= userLimit) {
+        return res.status(429).json({ 
+          error: `Limit harian untuk akun ${userRole} (${userLimit}x) telah tercapai. Silakan coba lagi besok atau hubungi admin untuk upgrade.` 
+        });
+      }
+
+      // Get API Key from Supabase settings first, then process.env
+      const { data: dbKey } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'GEMINI_API_KEY')
+        .single();
+        
+      const apiKey = dbKey?.value || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not configured on the server.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      
+      const parts: any[] = [{ text: message }];
+      if (image) {
+        const mimeType = image.split(';')[0].split(':')[1];
+        const base64Data = image.split(',')[1];
+        parts.push({
+          inlineData: {
+            mimeType,
+            data: base64Data
+          }
+        });
+      }
+
+      const topSyndrome = cdssAnalysis && cdssAnalysis.length > 0 ? cdssAnalysis[0].syndrome : null;
+      const tpContext = topSyndrome?.treatment_principle?.length ? `\nPRINSIP TERAPI DARI CDSS: ${topSyndrome.treatment_principle.join(', ')}` : '';
+      const herbContext = topSyndrome?.herbal_prescription ? `\nRESEP KLASIK DARI CDSS: ${topSyndrome.herbal_prescription}` : '';
+
+      const systemInstruction = `Anda adalah Pakar Senior TCM (Giovanni Maciocia). 
+Tugas: Memberikan diagnosis instan dalam JSON.
+WAJIB: Berikan 10-12 titik akupunktur. TAMBAHKAN juga rekomendasi titik dari Master Tung jika relevan.
+PENTING: Pisahkan analisis menjadi BEN (Akar) dan BIAO (Cabang).
+BARU: Sertakan "score" (0-100) untuk setiap item diferensiasi yang menunjukkan seberapa kuat gejala tersebut mendukung pola diagnosis.${tpContext}${herbContext}
+Gunakan PRINSIP TERAPI dan RESEP KLASIK dari CDSS di atas jika tersedia untuk mengisi "treatment_principle" dan "classical_prescription".
+Lakukan diferensiasi sindrom yang mendalam berdasarkan 8 Prinsip (Yin/Yang, Interior/Exterior, Cold/Heat, Deficiency/Excess) dan Organ Zang-Fu.
+JIKA ada indikasi OBESITAS atau masalah terkait berat badan, berikan analisis khusus dan saran.
+JIKA relevan atau diminta, berikan juga saran terkait AKUPUNTUR KECANTIKAN (Cosmetic Acupuncture).
+
+Bahasa: ${language}.
+Format JSON:
+{
+  "conversationalResponse": "1 kalimat penjelasan singkat.",
+  "diagnosis": {
+    "patternId": "Nama Sindrom (Pinyin - English)",
+    "explanation": "Ringkasan kasus dan patogenesis (bagaimana sindrom ini berkembang).",
+    "differentiation": {
+      "ben": [{"label": "Akar Masalah (Misal: Defisiensi Yin Ginjal)", "value": "Penjelasan mengapa ini akar masalah", "score": 95}],
+      "biao": [{"label": "Manifestasi Akut (Misal: Naiknya Yang Hati)", "value": "Penjelasan mengapa ini manifestasi akut", "score": 88}]
+    },
+    "treatment_principle": ["Tonify Kidney Yin", "Subdue Liver Yang"],
+    "classical_prescription": "Liu Wei Di Huang Wan",
+    "recommendedPoints": [{"code": "Kode", "description": "Fungsi spesifik untuk kasus ini"}],
+    "masterTungPoints": [{"code": "Kode/Nama Titik Master Tung", "description": "Fungsi spesifik"}],
+    "wuxingElement": "Wood/Fire/Earth/Metal/Water",
+    "lifestyleAdvice": "Saran praktis spesifik untuk pasien",
+    "herbal_recommendation": {"formula_name": "Nama Formula", "chief": ["Herbal1", "Herbal2"]},
+    "obesity_indication": "Penjelasan jika ada indikasi obesitas, atau null jika tidak ada",
+    "beauty_acupuncture": "Saran akupuntur kecantikan jika relevan, atau null jika tidak ada"
   }
+}`;
 
-  // --- API Routes ---
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [{ role: 'user', parts }],
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          temperature: 0.1,
+          thinkingConfig: { thinkingBudget: 0 }
+        }
+      });
 
-  // Users API
-  app.get("/api/users", async (req, res) => {
-    const users = await db.all('SELECT * FROM users');
-    res.json(users);
-  });
+      // Increment usage in Supabase
+      if (usage) {
+        await supabase
+          .from('usage')
+          .update({ count: currentCount + 1 })
+          .eq('username', user)
+          .eq('date', today);
+      } else {
+        await supabase
+          .from('usage')
+          .insert({ username: user, date: today, count: 1 });
+      }
 
-  app.post("/api/users", async (req, res) => {
-    const { username, password, role, createdAt } = req.body;
-    try {
-      await db.run('INSERT INTO users (username, password, role, createdAt) VALUES (?, ?, ?, ?)', [username, password, role, createdAt]);
-      res.json({ success: true });
-    } catch (e) {
-      res.status(400).json({ error: 'User already exists' });
+      res.json(JSON.parse(response.text.trim()));
+    } catch (error: any) {
+      console.error("Gemini Proxy Error:", error);
+      res.status(500).json({ error: error.message || "Gagal menghubungi AI. Silakan coba lagi nanti." });
     }
-  });
-
-  app.delete("/api/users/:username", async (req, res) => {
-    await db.run('DELETE FROM users WHERE username = ?', [req.params.username]);
-    res.json({ success: true });
-  });
-
-  // Patients API
-  app.get("/api/patients", async (req, res) => {
-    const patients = await db.all('SELECT * FROM patients ORDER BY timestamp DESC');
-    // Parse JSON fields back to objects
-    const parsedPatients = patients.map(p => ({
-      ...p,
-      selectedSymptoms: JSON.parse(p.selectedSymptoms || '[]'),
-      tongue: JSON.parse(p.tongue || '{}'),
-      pulse: JSON.parse(p.pulse || '{}'),
-      diagnosis: JSON.parse(p.diagnosis || '{}')
-    }));
-    res.json(parsedPatients);
-  });
-
-  app.post("/api/patients", async (req, res) => {
-    const p = req.body;
-    try {
-      await db.run(`
-        INSERT INTO patients (id, patientName, age, sex, address, complaint, symptoms, selectedSymptoms, tongue, pulse, diagnosis, timestamp, medicalHistory, biomedicalDiagnosis, icd10)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        p.id, p.patientName, p.age, p.sex, p.address, p.complaint, p.symptoms,
-        JSON.stringify(p.selectedSymptoms), JSON.stringify(p.tongue), JSON.stringify(p.pulse),
-        JSON.stringify(p.diagnosis), p.timestamp, p.medicalHistory, p.biomedicalDiagnosis, p.icd10
-      ]);
-      res.json({ success: true });
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to save patient' });
-    }
-  });
-
-  app.delete("/api/patients/:id", async (req, res) => {
-    await db.run('DELETE FROM patients WHERE id = ?', [req.params.id]);
-    res.json({ success: true });
   });
 
   // Vite middleware for development
@@ -116,7 +156,11 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   app.listen(PORT, "0.0.0.0", () => {

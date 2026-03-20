@@ -1,6 +1,7 @@
 
 import { UserAccount, SavedPatient, AdminMessage, Promotion } from '../types';
-import { db as firestore, auth, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query, where, updateDoc, onSnapshot } from '../firebase';
+import { supabase } from '../supabase';
+import { auth } from '../firebase';
 
 export const DEFAULT_ADMIN: UserAccount = {
   uid: 'haxor-super-saint',
@@ -11,204 +12,164 @@ export const DEFAULT_ADMIN: UserAccount = {
   createdAt: Date.now()
 };
 
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string;
-    email?: string | null;
-    emailVerified?: boolean;
-    isAnonymous?: boolean;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+const handleSupabaseError = (error: any, operation: string) => {
+  console.error(`Supabase Error (${operation}):`, error.message || error);
+  throw error;
+};
 
 export const db = {
   users: {
     getAll: async (): Promise<UserAccount[]> => {
-      try {
-        if (!auth.currentUser) return [];
-        const querySnapshot = await getDocs(collection(firestore, 'users'));
-        const users: UserAccount[] = [];
-        querySnapshot.forEach((doc) => {
-          users.push(doc.data() as UserAccount);
-        });
-        return users;
-      } catch (e) {
-        console.warn("Users fetch failed (likely unauthenticated):", e);
-        return [];
-      }
+      const { data, error } = await supabase.from('users').select('*');
+      if (error) handleSupabaseError(error, 'getAllUsers');
+      return data || [];
     },
     get: async (uid: string): Promise<UserAccount | null> => {
-      try {
-        const docSnap = await getDoc(doc(firestore, 'users', uid));
-        if (docSnap.exists()) {
-          return docSnap.data() as UserAccount;
-        }
-        return null;
-      } catch (e) {
-        handleFirestoreError(e, OperationType.GET, `users/${uid}`);
-        return null;
-      }
+      const { data, error } = await supabase.from('users').select('*').eq('uid', uid).single();
+      if (error && error.code !== 'PGRST116') handleSupabaseError(error, 'getUser');
+      return data || null;
     },
     add: async (user: UserAccount): Promise<boolean> => {
-      try {
-        if (!user.uid) throw new Error("User UID is required");
-        await setDoc(doc(firestore, 'users', user.uid), user);
-        return true;
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`);
+      const { error } = await supabase.from('users').upsert(user);
+      if (error) {
+        handleSupabaseError(error, 'addUser');
         return false;
       }
+      return true;
     },
     update: async (uid: string, data: Partial<UserAccount>): Promise<boolean> => {
-      try {
-        await updateDoc(doc(firestore, 'users', uid), data);
-        return true;
-      } catch (e) {
-        handleFirestoreError(e, OperationType.UPDATE, `users/${uid}`);
+      const { error } = await supabase.from('users').update(data).eq('uid', uid);
+      if (error) {
+        handleSupabaseError(error, 'updateUser');
         return false;
       }
+      return true;
     },
     delete: async (uid: string): Promise<boolean> => {
-      try {
-        await deleteDoc(doc(firestore, 'users', uid));
-        return true;
-      } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `users/${uid}`);
+      const { error } = await supabase.from('users').delete().eq('uid', uid);
+      if (error) {
+        handleSupabaseError(error, 'deleteUser');
         return false;
       }
+      return true;
     }
   },
   patients: {
     getAll: async (): Promise<SavedPatient[]> => {
-      try {
-        if (!auth.currentUser) return [];
-        // Check role for data isolation
-        const userProfile = await db.users.get(auth.currentUser.uid);
-        let q;
-        if (userProfile?.role === 'super_saint') {
-          q = collection(firestore, 'patients');
-        } else {
-          q = query(collection(firestore, 'patients'), where('authorUid', '==', auth.currentUser.uid));
-        }
-        const querySnapshot = await getDocs(q);
-        const patients: SavedPatient[] = [];
-        querySnapshot.forEach((doc) => {
-          patients.push(doc.data() as SavedPatient);
-        });
-        return patients;
-      } catch (e) {
-        handleFirestoreError(e, OperationType.LIST, 'patients');
-        return [];
+      if (!auth.currentUser) return [];
+      const userProfile = await db.users.get(auth.currentUser.uid);
+      
+      let query = supabase.from('patients').select('*');
+      if (userProfile?.role !== 'super_saint') {
+        query = query.eq('authorUid', auth.currentUser.uid);
       }
+      
+      const { data, error } = await query.order('timestamp', { ascending: false });
+      if (error) handleSupabaseError(error, 'getAllPatients');
+      return data || [];
     },
     add: async (patient: SavedPatient) => {
-      try {
-        if (!auth.currentUser) throw new Error("Not authenticated");
-        const patientWithAuth = { ...patient, authorUid: auth.currentUser.uid };
-        await setDoc(doc(firestore, 'patients', patient.id), patientWithAuth);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `patients/${patient.id}`);
-      }
+      if (!auth.currentUser) throw new Error("Not authenticated");
+      const patientWithAuth = { ...patient, authorUid: auth.currentUser.uid };
+      const { error } = await supabase.from('patients').upsert(patientWithAuth);
+      if (error) handleSupabaseError(error, 'addPatient');
     },
     delete: async (id: string) => {
-      try {
-        await deleteDoc(doc(firestore, 'patients', id));
-      } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `patients/${id}`);
-      }
+      const { error } = await supabase.from('patients').delete().eq('id', id);
+      if (error) handleSupabaseError(error, 'deletePatient');
     }
   },
   messages: {
     send: async (msg: AdminMessage) => {
-      try {
-        await setDoc(doc(firestore, 'messages', msg.id), msg);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `messages/${msg.id}`);
-      }
+      const { error } = await supabase.from('messages').upsert(msg);
+      if (error) handleSupabaseError(error, 'sendMessage');
     },
     getByUser: (uid: string, callback: (msgs: AdminMessage[]) => void) => {
-      if (!auth.currentUser) return () => {};
-      const q = query(collection(firestore, 'messages'), where('recipientUid', '==', uid));
-      return onSnapshot(q, (snapshot) => {
-        const msgs: AdminMessage[] = [];
-        snapshot.forEach(doc => msgs.push(doc.data() as AdminMessage));
-        callback(msgs.sort((a, b) => b.timestamp - a.timestamp));
-      }, (e) => {
-        console.warn("Messages fetch failed (likely unauthenticated):", e.message);
-      });
+      // Supabase Realtime for messages
+      const subscription = supabase
+        .channel('public:messages')
+        .on('postgres_changes', { event: '*', filter: `recipientUid=eq.${uid}`, schema: 'public', table: 'messages' }, () => {
+          // Fetch all messages on change
+          db.messages.fetchAll(uid).then(callback);
+        })
+        .subscribe();
+
+      // Initial fetch
+      db.messages.fetchAll(uid).then(callback);
+
+      return () => {
+        supabase.removeChannel(subscription);
+      };
+    },
+    fetchAll: async (uid: string): Promise<AdminMessage[]> => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('recipientUid', uid)
+        .order('timestamp', { ascending: false });
+      if (error) {
+        console.warn("Messages fetch failed:", error.message);
+        return [];
+      }
+      return data || [];
     },
     markAsRead: async (id: string) => {
-      try {
-        await updateDoc(doc(firestore, 'messages', id), { isRead: true });
-      } catch (e) {
-        handleFirestoreError(e, OperationType.UPDATE, `messages/${id}`);
-      }
+      const { error } = await supabase.from('messages').update({ isRead: true }).eq('id', id);
+      if (error) handleSupabaseError(error, 'markAsRead');
     }
   },
   promotions: {
     getAll: (callback: (promos: Promotion[]) => void) => {
-      return onSnapshot(collection(firestore, 'promotions'), (snapshot) => {
-        const promos: Promotion[] = [];
-        snapshot.forEach(doc => promos.push(doc.data() as Promotion));
-        callback(promos.sort((a, b) => b.createdAt - a.createdAt));
-      }, (e) => {
-        console.warn("Promotions fetch failed (likely unauthenticated):", e.message);
-      });
+      // Supabase Realtime for promotions
+      const subscription = supabase
+        .channel('public:promotions')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'promotions' }, () => {
+          db.promotions.fetchAll().then(callback);
+        })
+        .subscribe();
+
+      // Initial fetch
+      db.promotions.fetchAll().then(callback);
+
+      return () => {
+        supabase.removeChannel(subscription);
+      };
+    },
+    fetchAll: async (): Promise<Promotion[]> => {
+      const { data, error } = await supabase
+        .from('promotions')
+        .select('*')
+        .order('createdAt', { ascending: false });
+      if (error) {
+        console.warn("Promotions fetch failed:", error.message);
+        return [];
+      }
+      return data || [];
     },
     add: async (promo: Promotion) => {
-      try {
-        await setDoc(doc(firestore, 'promotions', promo.id), promo);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `promotions/${promo.id}`);
-      }
+      const { error } = await supabase.from('promotions').upsert(promo);
+      if (error) handleSupabaseError(error, 'addPromotion');
     },
     delete: async (id: string) => {
-      try {
-        await deleteDoc(doc(firestore, 'promotions', id));
-      } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `promotions/${id}`);
+      const { error } = await supabase.from('promotions').delete().eq('id', id);
+      if (error) handleSupabaseError(error, 'deletePromotion');
+    }
+  },
+  settings: {
+    getAll: async (): Promise<Record<string, string>> => {
+      const { data, error } = await supabase.from('settings').select('*');
+      if (error) handleSupabaseError(error, 'getAllSettings');
+      const config: Record<string, string> = {};
+      data?.forEach(s => { config[s.key] = s.value; });
+      return config;
+    },
+    set: async (key: string, value: string): Promise<boolean> => {
+      const { error } = await supabase.from('settings').upsert({ key, value });
+      if (error) {
+        handleSupabaseError(error, 'setSetting');
+        return false;
       }
+      return true;
     }
   }
 };

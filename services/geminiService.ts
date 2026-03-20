@@ -1,5 +1,4 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { Language, ScoredSyndrome } from '../types';
 
 const getSystemInstruction = (language: Language, cdssAnalysis?: ScoredSyndrome[]) => {
@@ -48,37 +47,36 @@ export const sendMessageToGeminiStream = async (
   language: Language,
   isPregnant: boolean,
   cdssAnalysis?: ScoredSyndrome[],
-  onChunk?: (text: string) => void
+  onChunk?: (text: string) => void,
+  userRole?: string,
+  username?: string
 ) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
-    const parts: any[] = [{ text: message }];
-    if (image) {
-      const mimeType = image.split(';')[0].split(':')[1];
-      const base64Data = image.split(',')[1];
-      parts.push({
-        inlineData: {
-          mimeType,
-          data: base64Data
-        }
-      });
-    }
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: [{ role: 'user', parts }],
-      config: {
-        systemInstruction: getSystemInstruction(language, cdssAnalysis),
-        responseMimeType: "application/json",
-        temperature: 0.1,
-        thinkingConfig: { thinkingBudget: 0 }
-      }
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message,
+        image,
+        language,
+        cdssAnalysis,
+        userRole,
+        username
+      }),
     });
 
-    const cleanText = response.text.trim();
-    if (onChunk) onChunk(cleanText);
-    return JSON.parse(cleanText);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Gagal menghubungi AI.");
+    }
+
+    const data = await response.json();
+    if (onChunk && data.conversationalResponse) {
+      onChunk(data.conversationalResponse);
+    }
+    return data;
   } catch (error) {
     console.error("Gemini Critical Error:", error);
     throw error;

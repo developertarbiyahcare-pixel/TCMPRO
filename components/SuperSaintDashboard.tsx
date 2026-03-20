@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Shield, MessageSquare, Megaphone, Trash2, Ban, CheckCircle, Clock, Activity, Send } from 'lucide-react';
+import { Users, Shield, MessageSquare, Megaphone, Trash2, Ban, CheckCircle, Clock, Activity, Send, Key, Save } from 'lucide-react';
 import { UserAccount, AdminMessage, Promotion } from '../types';
 import { db } from '../services/db';
 
@@ -12,13 +12,24 @@ const SuperSaintDashboard: React.FC = () => {
   const [promoContent, setPromoContent] = useState('');
   const [promoLink, setPromoLink] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [geminiKey, setGeminiKey] = useState('');
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    const fetchData = async () => {
       const allUsers = await db.users.getAll();
       setUsers(allUsers);
+      
+      // Fetch settings
+      try {
+        const config = await db.settings.getAll();
+        if (config.GEMINI_API_KEY) {
+          setGeminiKey(config.GEMINI_API_KEY);
+        }
+      } catch (e) {
+        console.error("Failed to fetch settings", e);
+      }
     };
-    fetchUsers();
+    fetchData();
   }, []);
 
   const handleUpdateStatus = async (uid: string, status: 'active' | 'suspended' | 'expired') => {
@@ -68,6 +79,22 @@ const SuperSaintDashboard: React.FC = () => {
     alert('Iklan/Promosi ditambahkan!');
   };
 
+  const handleSaveSettings = async () => {
+    setIsLoading(true);
+    try {
+      const success = await db.settings.set('GEMINI_API_KEY', geminiKey);
+      if (success) {
+        alert('Pengaturan sistem berhasil disimpan!');
+      } else {
+        alert('Gagal menyimpan pengaturan.');
+      }
+    } catch (e) {
+      alert('Terjadi kesalahan saat menyimpan.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-8 overflow-y-auto h-full scrollbar-hide">
       <div className="flex items-center gap-3 mb-6">
@@ -80,73 +107,102 @@ const SuperSaintDashboard: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* User List */}
-        <div className="lg:col-span-2 bg-white rounded-3xl border border-purple-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-purple-50 bg-purple-50/30 flex justify-between items-center">
-            <h3 className="font-black text-purple-950 flex items-center gap-2"><Users className="w-5 h-5" /> DAFTAR PENGGUNA</h3>
-            <span className="bg-purple-200 text-purple-700 px-3 py-1 rounded-full text-xs font-black">{users.length} TOTAL</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-purple-50/50 text-[10px] uppercase font-black text-purple-400 tracking-widest">
-                <tr>
-                  <th className="px-6 py-4">User</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Subscription</th>
-                  <th className="px-6 py-4">Sessions</th>
-                  <th className="px-6 py-4">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-purple-50">
-                {users.map(user => (
-                  <tr key={user.uid} className="hover:bg-purple-50/30 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-purple-950">{user.username}</div>
-                      <div className="text-[10px] text-purple-400">{user.email}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
-                        user.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 
-                        user.status === 'suspended' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-                      }`}>
-                        {user.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-[10px] font-bold text-purple-600">
-                        {user.subscriptionExpiry ? new Date(user.subscriptionExpiry).toLocaleDateString() : 'FOREVER'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1 text-[10px] font-black text-purple-400">
-                        <Activity className="w-3 h-3" /> {user.activeSessions || 0}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button onClick={() => setSelectedUser(user)} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><MessageSquare className="w-4 h-4" /></button>
-                        <button onClick={() => handleUpdateStatus(user.uid!, user.status === 'suspended' ? 'active' : 'suspended')} className={`p-2 rounded-xl transition-all ${user.status === 'suspended' ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600' : 'bg-rose-50 text-rose-600 hover:bg-rose-600'} hover:text-white`}>
-                          {user.status === 'suspended' ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
-                        </button>
-                        <div className="relative group">
-                          <button className="p-2 bg-purple-50 text-purple-600 rounded-xl hover:bg-purple-600 hover:text-white transition-all"><Clock className="w-4 h-4" /></button>
-                          <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block bg-white border border-purple-100 shadow-xl rounded-2xl p-2 z-50 w-40">
-                            {[1, 3, 6, 12, -1].map(m => (
-                              <button 
-                                key={m}
-                                onClick={() => handleUpdateSubscription(user.uid!, m)}
-                                className="w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-purple-50 rounded-lg"
-                              >
-                                {m === -1 ? 'Set Selamanya' : `Set ${m} Bulan`}
-                              </button>
-                            ))}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white rounded-3xl border border-purple-100 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-purple-50 bg-purple-50/30 flex justify-between items-center">
+              <h3 className="font-black text-purple-950 flex items-center gap-2"><Users className="w-5 h-5" /> DAFTAR PENGGUNA</h3>
+              <span className="bg-purple-200 text-purple-700 px-3 py-1 rounded-full text-xs font-black">{users.length} TOTAL</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-purple-50/50 text-[10px] uppercase font-black text-purple-400 tracking-widest">
+                  <tr>
+                    <th className="px-6 py-4">User</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Subscription</th>
+                    <th className="px-6 py-4">Sessions</th>
+                    <th className="px-6 py-4">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-purple-50">
+                  {users.map(user => (
+                    <tr key={user.uid} className="hover:bg-purple-50/30 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="font-bold text-purple-950">{user.username}</div>
+                        <div className="text-[10px] text-purple-400">{user.email}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                          user.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 
+                          user.status === 'suspended' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {user.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-[10px] font-bold text-purple-600">
+                          {user.subscriptionExpiry ? new Date(user.subscriptionExpiry).toLocaleDateString() : 'FOREVER'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1 text-[10px] font-black text-purple-400">
+                          <Activity className="w-3 h-3" /> {user.activeSessions || 0}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex gap-2">
+                          <button onClick={() => setSelectedUser(user)} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><MessageSquare className="w-4 h-4" /></button>
+                          <button onClick={() => handleUpdateStatus(user.uid!, user.status === 'suspended' ? 'active' : 'suspended')} className={`p-2 rounded-xl transition-all ${user.status === 'suspended' ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600' : 'bg-rose-50 text-rose-600 hover:bg-rose-600'} hover:text-white`}>
+                            {user.status === 'suspended' ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                          </button>
+                          <div className="relative group">
+                            <button className="p-2 bg-purple-50 text-purple-600 rounded-xl hover:bg-purple-600 hover:text-white transition-all"><Clock className="w-4 h-4" /></button>
+                            <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block bg-white border border-purple-100 shadow-xl rounded-2xl p-2 z-50 w-40">
+                              {[1, 3, 6, 12, -1].map(m => (
+                                <button 
+                                  key={m}
+                                  onClick={() => handleUpdateSubscription(user.uid!, m)}
+                                  className="w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-purple-50 rounded-lg"
+                                >
+                                  {m === -1 ? 'Set Selamanya' : `Set ${m} Bulan`}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* System Settings */}
+          <div className="bg-white rounded-3xl border border-purple-100 shadow-sm p-6">
+            <h3 className="font-black text-purple-950 flex items-center gap-2 mb-4"><Key className="w-5 h-5" /> PENGATURAN SISTEM</h3>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-black text-purple-400 uppercase tracking-widest">Gemini API Key</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password" 
+                    value={geminiKey} 
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    placeholder="Masukkan API Key Baru..."
+                    className="flex-1 bg-purple-50 border border-purple-100 rounded-xl p-3 text-xs outline-none focus:bg-white"
+                  />
+                  <button 
+                    onClick={handleSaveSettings}
+                    disabled={isLoading}
+                    className="px-6 bg-purple-950 text-white font-black py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs"
+                  >
+                    <Save className="w-4 h-4" /> SIMPAN
+                  </button>
+                </div>
+                <p className="text-[10px] text-purple-400 italic">API Key ini akan digunakan untuk semua permintaan chat AI. Jika kosong, sistem akan menggunakan environment variable.</p>
+              </div>
+            </div>
           </div>
         </div>
 
