@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "A user account for the TCM application.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_saint", "admin", "user"] },
+        "status": { "type": "string", "enum": ["active", "suspended", "expired"] },
+        "subscriptionExpiry": { "type": "number", "description": "Timestamp when subscription ends" },
+        "lastLogin": { "type": "number" },
+        "activeSessions": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["uid", "username", "role", "status", "createdAt"]
+    },
+    "AdminMessage": {
+      "title": "AdminMessage",
+      "description": "Messages from Super Admin to users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipientUid": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "recipientUid", "content", "timestamp"]
+    },
+    "Promotion": {
+      "title": "Promotion",
+      "description": "Classified ads or promotional content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "link": { "type": "string" },
+        "expiryDate": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "title", "content", "createdAt"]
+    },
+    "SavedPatient": {
+      "title": "SavedPatient",
+      "description": "A saved patient record including diagnosis.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique ID of the patient record."
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "The UID of the user who created this record."
+        },
+        "patientName": {
+          "type": "string"
+        },
+        "age": {
+          "type": "string"
+        },
+        "sex": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "complaint": {
+          "type": "string"
+        },
+        "symptoms": {
+          "type": "string"
+        },
+        "selectedSymptoms": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tongue": {
+          "type": "object"
+        },
+        "pulse": {
+          "type": "object"
+        },
+        "diagnosis": {
+          "type": "object"
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "medicalHistory": {
+          "type": "string"
+        },
+        "biomedicalDiagnosis": {
+          "type": "string"
+        },
+        "icd10": {
+          "type": "string"
+        },
+        "medications": {
+          "type": "string"
+        },
+        "followUpDate": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "authorUid", "patientName", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Stores user profiles."
+    },
+    "/patients/{patientId}": {
+      "schema": { "$ref": "#/entities/SavedPatient" },
+      "description": "Stores patient records."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/AdminMessage" },
+      "description": "Stores admin messages."
+    },
+    "/promotions/{promoId}": {
+      "schema": { "$ref": "#/entities/Promotion" },
+      "description": "Stores promotional content."
+    }
+  }
+}
