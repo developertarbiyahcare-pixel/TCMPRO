@@ -25,20 +25,16 @@ TCM WuXing Pro adalah asisten digital canggih untuk praktisi Pengobatan Tradisio
 
 ```text
 /
-├── components/          # Komponen UI (Atomic & Composite)
-│   ├── DiagnosisCard    # Display hasil diagnosa AI
-│   ├── PatientForm      # Form input data klinis
-│   ├── WuXingMaster     # Panel analisis Lima Unsur
+├── src/                 # Source code (React & Server)
+│   ├── components/      # Komponen UI (Atomic & Composite)
+│   ├── services/        # Logika Bisnis & API
+│   ├── App.tsx          # Root Layout & State Management
+│   ├── server.ts        # Express Server (Proxy AI)
 │   └── ...
-├── services/            # Logika Bisnis & API
-│   ├── geminiService    # Integrasi AI & System Instructions
-│   ├── tcmLogic         # Algoritma matching & Wu Xing logic
-│   ├── db               # Abstraksi penyimpanan lokal
-│   └── authService      # Manajemen akses user
-├── types.ts             # Definisi Interface & Type TypeScript
-├── constants.ts         # Database TCM (Maciocia Core Data)
-├── App.tsx              # Root Layout & State Management
-└── index.html           # Entry point & Import Maps
+├── public/              # Aset statis & PWA (manifest, sw)
+├── netlify/             # Konfigurasi Netlify Functions
+├── index.html           # Entry point
+└── vite.config.ts       # Konfigurasi Build
 ```
 
 ## 🧠 Logika TCM & AI
@@ -58,11 +54,30 @@ AI diberikan instruksi sistem (System Instruction) untuk berperan sebagai "Senio
 - `differentiation.biao`: Manifestasi akut (Symptoms).
 - `score`: Persentase kecocokan klinis.
 
+## 🚀 Deployment (Netlify)
+
+Untuk mengatasi masalah "blank page" dan memastikan backend berjalan di Netlify:
+
+1.  **Build Settings**:
+    *   **Build Command**: `npm run build`
+    *   **Publish Directory**: `dist`
+    *   **Functions Directory**: `netlify/functions`
+
+2.  **Environment Variables**:
+    *   Tambahkan variabel berikut di Netlify (Site Settings > Build & deploy > Environment):
+        *   `GEMINI_API_KEY`: API Key Google Gemini Anda.
+        *   `VITE_SUPABASE_URL`: URL Proyek Supabase Anda.
+        *   `VITE_SUPABASE_ANON_KEY`: Anon Key Supabase Anda.
+        *   `NETLIFY`: `true` (Penting untuk mode serverless).
+
+3.  **PWA**:
+    *   Aplikasi sudah mendukung PWA. Setelah deploy, Anda bisa "Install" aplikasi ini di HP atau Desktop untuk akses offline.
+
 ## ⚙️ Instalasi & Konfigurasi
 
 1. Pastikan Anda memiliki API Key dari [Google AI Studio](https://aistudio.google.com/).
-2. Aplikasi mengharapkan variabel lingkungan `process.env.API_KEY`.
-3. Jalankan aplikasi melalui browser yang mendukung ES Modules.
+2. Tambahkan variabel lingkungan `GEMINI_API_KEY`, `VITE_SUPABASE_URL`, dan `VITE_SUPABASE_ANON_KEY`.
+3. Jalankan `npm run dev` untuk pengembangan lokal.
 
 ## 📄 Lisensi
 Sistem ini dikembangkan untuk tujuan edukasi dan asisten klinis profesional. Diagnosis akhir tetap menjadi tanggung jawab praktisi medis berlisensi.

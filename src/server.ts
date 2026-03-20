@@ -5,9 +5,8 @@ import rateLimit from "express-rate-limit";
 import path from "path";
 import { supabase } from "./supabase";
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
-  const PORT = 3000;
 
   app.use(express.json({ limit: '10mb' })); // Increase limit for images
 
@@ -113,7 +112,7 @@ Format JSON:
     "lifestyleAdvice": "Saran praktis spesifik untuk pasien",
     "herbal_recommendation": {"formula_name": "Nama Formula", "chief": ["Herbal1", "Herbal2"]},
     "obesity_indication": "Penjelasan jika ada indikasi obesitas, atau null jika tidak ada",
-    "beauty_acupuncture": "Saran akupuntur kecantikan jika relevan, atau null jika tidak ada"
+    "beauty_acupuncture": "Saran akupuntur kecantikan jika relevan, or null jika tidak ada"
   }
 }`;
 
@@ -148,6 +147,13 @@ Format JSON:
     }
   });
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createExpressApp();
+  const PORT = 3000;
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -168,4 +174,6 @@ Format JSON:
   });
 }
 
-startServer();
+if (process.env.NODE_ENV !== "production" || !process.env.NETLIFY) {
+  startServer();
+}
