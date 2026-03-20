@@ -28,12 +28,12 @@ export async function createExpressApp() {
     
     // Define limits based on roles
     const limits: Record<string, number> = {
-      'user': 5,
-      'admin': 100,
-      'super_saint': 1000
+      'user': 50, // Increased from 5
+      'admin': 500,
+      'super_saint': 10000
     };
     
-    const userLimit = limits[userRole] || 5;
+    const userLimit = limits[userRole] || 50;
 
     try {
       // Check usage from Supabase
@@ -174,6 +174,6 @@ async function startServer() {
   });
 }
 
-if (process.env.NODE_ENV !== "production" || !process.env.NETLIFY) {
+if (process.env.NODE_ENV !== "production" && !process.env.IS_SERVERLESS) {
   startServer();
 }
