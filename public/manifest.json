@@ -1,0 +1,21 @@
+{
+  "name": "TCM WuXing Pro",
+  "short_name": "TCM Pro",
+  "description": "Professional TCM Diagnosis & WuXing Analysis System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf5ff",
+  "theme_color": "#7e22ce",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/tcm/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/tcm/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

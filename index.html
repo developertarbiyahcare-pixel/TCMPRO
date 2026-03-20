@@ -45,6 +45,9 @@
         }
       }
     </script>
+    <meta name="theme-color" content="#7e22ce" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="https://picsum.photos/seed/tcm/192/192" />
     <style>
       .scrollbar-hide::-webkit-scrollbar { display: none; }
       .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
@@ -96,6 +99,19 @@
 </head>
   <body class="bg-purple-50 text-purple-950 h-screen overflow-hidden print:h-auto print:overflow-visible">
     <div id="root" class="h-full print:h-auto"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+    <script type="module" src="/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('SW registered: ', registration);
+            })
+            .catch(registrationError => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+    </script>
+  </body>
 </html>
